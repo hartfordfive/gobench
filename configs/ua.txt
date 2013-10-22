@@ -1,0 +1,7 @@
+Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.28 Safari/537.36
+BlackBerry9000/5.0.0.1067 Profile/MIDP-2.1 Configuration/CLDC-1.1 VendorID/102
+Android 4.0.3;AppleWebKit/534.30;Build/IML74K;GT-I9220 Build/IML74K
+Mozilla/5.0 (iPad; CPU OS 5_0_1 like Mac OS X) AppleWebKit/534.46 (KHTML, like Gecko) Version/5.1 Mobile/9A405 Safari/7534.48.3
+Mozilla/5.0 (Compatible; MSIE 9.0; Windows Phone OS 7.5; Trident/5.0;IEMobile/9.0; HTS;7 Throphy T8686)
+Mozilla/5.0 (Linux; Android 4.2.1; ASUS Transformer Pad TF300T Build/JOP40D) AppleWebKit/535.19 (KHTML, like Gecko) Chrome/18.0.1025.166 Safari/535.19
+Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_3; en-us) AppleWebKit/533.16 (KHTML, like Gecko) Version/5.0 Safari/533.16

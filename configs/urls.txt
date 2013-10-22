@@ -1,0 +1,5 @@
+http://www.yourdomain.com/
+http://www.yourdomain.com/someuri/
+http://www.yourdomain.com/someuri/someaction
+http://www.yourdomain.com/someuri/someaction?qs=val1&qs2=val2
+http://www.yourdomain.com/anotheruri
