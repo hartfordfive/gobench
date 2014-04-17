@@ -20,7 +20,11 @@ import (
 )
 
 const (
-	DEFAULT_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/33.0.1750.152 Safari/537.36"
+	DEFAULT_UA            = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/33.0.1750.152 Safari/537.36"
+	VERSION_MAJOR  int    = 1
+	VERSION_MINOR  int    = 1
+	VERSION_PATCH  int    = 0
+	VERSION_SUFFIX string = ""
 )
 
 type BenchOptions struct {
@@ -58,6 +62,10 @@ type BenchStats struct {
 	NumPass          int
 	BytesDownloaded  int
 	ServerType       string
+}
+
+func getVersion() string {
+	return strconv.Itoa(VERSION_MAJOR) + "." + strconv.Itoa(VERSION_MINOR) + "." + strconv.Itoa(VERSION_PATCH) + "-" + VERSION_SUFFIX
 }
 
 func SortResponseTimes(sl []int) []int {
@@ -274,6 +282,17 @@ func loadFileToArray(inFile string) []string {
 	return nil
 }
 
+func loadHeadersFile(inFile string) []string {
+
+	headersMap := map[][string]string{}
+	for _,v := loadFileToArray(inFile) {
+		parts := strings.Split(v, "~")
+
+		headersMap = headersMap.append(headersMap, map[string]string{})
+	}
+	return requestHeaders
+}
+
 func makeRequest(urlToCall string, opt *BenchOptions, stats *BenchStats) { //w *sync.WaitGroup) {
 
 	client := &http.Client{}
@@ -360,7 +379,7 @@ func makeRequest(urlToCall string, opt *BenchOptions, stats *BenchStats) { //w *
 
 func main() {
 
-	var url, postDataFile, urlList, uaList, cookieFile, userAgent string
+	var url, postDataFile, urlList, uaList, cookieFile, userAgent, headersList string
 	var concurency, totalTests, maxCores, rampTime, timeWait int
 	var once [4]sync.Once
 
@@ -376,6 +395,7 @@ func main() {
 		"cf": "File containing the cookies to send for a given request",
 		"ul": "File containing the list of user-agents to use for each request at random.",
 		"ua": "User agent to use for stress test (overridden by ul)",
+		"hl": "Headers list file to use",
 	}
 
 	if len(os.Args) == 2 {
@@ -383,9 +403,16 @@ func main() {
 			fmt.Println("GoLog - Version " + getVersion() + "\n")
 			os.Exit(0)
 		} else if os.Args[1] == "-h" || os.Args[1] == "--help" {
-			fmt.Println("-u : The full url to test\n")
+			for k, v := range description {
+				fmt.Println("-" + k + " : " + v + "\n")
+			}
 			os.Exit(0)
 		}
+	} else if len(os.Args) == 1 {
+		for k, v := range description {
+			fmt.Println("-" + k + " : " + v + "\n")
+		}
+		os.Exit(0)
 	}
 
 	flag.StringVar(&url, "u", "", description["u"])
@@ -400,6 +427,7 @@ func main() {
 	flag.StringVar(&cookieFile, "cf", "", description["cf"])
 	flag.StringVar(&uaList, "ul", "", description["ul"])
 	flag.StringVar(&userAgent, "ua", "", description["ua"])
+	flag.StringVar(&headersList, "hl", "", description["hl"])
 
 	flag.Parse()
 
@@ -442,6 +470,13 @@ func main() {
 
 	if uaList != "" {
 		options.UserAgents = loadFileToArray(uaList)
+	}
+
+	if headersList != "" {
+		hdrs := loadHeadersFile("playback_headers.txt")
+		for _, v := range hdrs {
+			fmt.Println(v)
+		}
 	}
 
 	options.TotalTests = totalTests
