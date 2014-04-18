@@ -483,7 +483,7 @@ func main() {
 	}
 
 	if headersList != "" {
-		options.HeaderList = loadHeadersFile("playback_headers.txt")
+		options.HeaderList = loadHeadersFile("configs/playback_headers.txt")
 	}
 
 	options.TotalTests = totalTests
