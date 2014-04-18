@@ -401,9 +401,9 @@ func main() {
 
 	description := map[string]string{
 		"u":  "The full url to test (required)",
-		"c":  "Number of requests to run concurrently",
-		"p":  "Number of processor cores to use",
-		"m":  "Total number of tests to run",
+		"c":  "Number of requests to run concurrently (default = 1)",
+		"p":  "Number of processor cores to use (default = 1)",
+		"m":  "Total number of tests to run (default = 25)",
 		"rt": "The number of milliseconds until ramped up to specified concurency",
 		"tw": "The number of milliseconds to wait betweeen concurent test runs",
 		"pd": "Enable POST request and use specifid data file",
