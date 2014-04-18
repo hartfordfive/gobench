@@ -31,6 +31,7 @@ type BenchOptions struct {
 	Method      string
 	UserAgent   string
 	Header      map[string]string
+	HeaderList  []map[string]string
 	Timeout     int
 	PostData    map[string]string
 	TimeBetween int64
@@ -282,15 +283,19 @@ func loadFileToArray(inFile string) []string {
 	return nil
 }
 
-func loadHeadersFile(inFile string) []string {
+func loadHeadersFile(inFile string) []map[string]string {
 
-	headersMap := map[][string]string{}
-	for _,v := loadFileToArray(inFile) {
-		parts := strings.Split(v, "~")
-
-		headersMap = headersMap.append(headersMap, map[string]string{})
+	hdrs := loadFileToArray(inFile)
+	headersMap := []map[string]string{}
+	for _, h := range hdrs {
+		requestHeaders := strings.Split(h, "~")
+		for _, hp := range requestHeaders {
+			headerParts := strings.Split(hp, ":")
+			headersMap = append(headersMap, map[string]string{headerParts[0]: headerParts[1]})
+		}
 	}
-	return requestHeaders
+
+	return headersMap
 }
 
 func makeRequest(urlToCall string, opt *BenchOptions, stats *BenchStats) { //w *sync.WaitGroup) {
@@ -329,13 +334,14 @@ func makeRequest(urlToCall string, opt *BenchOptions, stats *BenchStats) { //w *
 		req.Header.Add("User-Agent", opt.UserAgent)
 	}
 
-	if len(opt.Header) >= 1 {
+	if len(opt.HeaderList) >= 1 {
 		if len(opt.PostData) >= 1 {
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded; param=value")
 		}
-		req.Header.Add("Connection", "Keep-alive")
-		for k, v := range opt.Header {
-			req.Header.Add(k, v)
+		//req.Header.Add("Connection", "Keep-alive")
+		index := rand.Intn(len(opt.HeaderList))
+		for k, v := range opt.HeaderList[index] {
+			req.Header.Add(k, strings.Trim(v, " "))
 		}
 	}
 
@@ -377,6 +383,16 @@ func makeRequest(urlToCall string, opt *BenchOptions, stats *BenchStats) { //w *
 
 }
 
+func showCommandUsage(desc map[string]string) {
+
+	fmt.Println("Command usage:\n")
+	for k, v := range desc {
+		fmt.Println("\t-" + k + " : " + v)
+	}
+	fmt.Println("\n")
+	os.Exit(0)
+}
+
 func main() {
 
 	var url, postDataFile, urlList, uaList, cookieFile, userAgent, headersList string
@@ -384,7 +400,7 @@ func main() {
 	var once [4]sync.Once
 
 	description := map[string]string{
-		"u":  "The full url to test",
+		"u":  "The full url to test (required)",
 		"c":  "Number of requests to run concurrently",
 		"p":  "Number of processor cores to use",
 		"m":  "Total number of tests to run",
@@ -403,16 +419,10 @@ func main() {
 			fmt.Println("GoLog - Version " + getVersion() + "\n")
 			os.Exit(0)
 		} else if os.Args[1] == "-h" || os.Args[1] == "--help" {
-			for k, v := range description {
-				fmt.Println("-" + k + " : " + v + "\n")
-			}
-			os.Exit(0)
+			showCommandUsage(description)
 		}
 	} else if len(os.Args) == 1 {
-		for k, v := range description {
-			fmt.Println("-" + k + " : " + v + "\n")
-		}
-		os.Exit(0)
+		showCommandUsage(description)
 	}
 
 	flag.StringVar(&url, "u", "", description["u"])
@@ -432,7 +442,7 @@ func main() {
 	flag.Parse()
 
 	if url == "" {
-
+		showCommandUsage(description)
 	}
 
 	if maxCores > runtime.NumCPU() {
@@ -473,10 +483,7 @@ func main() {
 	}
 
 	if headersList != "" {
-		hdrs := loadHeadersFile("playback_headers.txt")
-		for _, v := range hdrs {
-			fmt.Println(v)
-		}
+		options.HeaderList = loadHeadersFile("playback_headers.txt")
 	}
 
 	options.TotalTests = totalTests
