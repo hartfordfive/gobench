@@ -90,18 +90,9 @@ func (rh *RequestHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) 
 		parts = append(parts, k+": "+v[0])
 	}
 
-	/*
-		_ = writeToFile("playback_headers.txt", strings.Join(parts, "~")+"\n")
-
-		output, _ := json.Marshal(headers)
-		fmt.Fprintf(res, string(output))
-	*/
-
 	if count < total {
 
-		rnd := rand.Float64()
-		fmt.Println("Random float:", rnd)
-		if rnd <= sampleRate {
+		if rand.Float64() <= sampleRate {
 			fmt.Println("Adding to headers!")
 			header_list = append(header_list, headers)
 			count++
@@ -111,6 +102,7 @@ func (rh *RequestHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) 
 		hList, _ := json.Marshal(header_list)
 		_ = writeToFile("playback_headers.txt", string(hList))
 		fmt.Println("Header collection complete.\n")
+		fmt.Println("Headers written to playback_headers.txt\n")
 		os.Exit(0)
 	}
 
@@ -130,7 +122,7 @@ func main() {
 
 	description := map[string]string{
 		"t": "Total number of headers to record (default 50)",
-		"s": "Sample rate x/y - record x out of y requests (default 1/10)",
+		"s": "Sample rate x.y - (1.0 <= x > 0.0, default 0.2)",
 	}
 
 	if len(os.Args) == 2 {
@@ -154,7 +146,7 @@ func main() {
 	}
 
 	if sampleRate == 0.0 {
-		sampleRate = 0.1
+		sampleRate = 0.2
 	}
 
 	if total < 1 {
