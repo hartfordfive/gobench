@@ -3,19 +3,35 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
+	//"strings"
+	"flag"
 	"sync"
 	"time"
 )
 
 const (
-	DEBUG = true
+	DEBUG                 = true
+	DEFAULT_UA            = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/33.0.1750.152 Safari/537.36"
+	VERSION_MAJOR  int    = 1
+	VERSION_MINOR  int    = 1
+	VERSION_PATCH  int    = 0
+	VERSION_SUFFIX string = ""
 )
 
 type RequestHandler struct{}
+
+var sampleRate float64
+var total int64
+var count int64
+var header_list []map[string]string
+
+func getVersion() string {
+	return strconv.Itoa(VERSION_MAJOR) + "." + strconv.Itoa(VERSION_MINOR) + "." + strconv.Itoa(VERSION_PATCH) + "-" + VERSION_SUFFIX
+}
 
 func dateStampAsString() string {
 	t := time.Now()
@@ -67,21 +83,89 @@ func (rh *RequestHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) 
 	res.Header().Set("Server", "GoBench Header Recorder")
 
 	// Store all the headers from the current request in header map
-	headers := make(map[string]string)
+	headers := map[string]string{}
 	var parts []string
 	for k, v := range req.Header {
 		headers[k] = v[0]
 		parts = append(parts, k+": "+v[0])
 	}
 
-	_ = writeToFile("playback_headers.txt", strings.Join(parts, "~")+"\n")
+	/*
+		_ = writeToFile("playback_headers.txt", strings.Join(parts, "~")+"\n")
 
-	output, _ := json.Marshal(headers)
-	fmt.Fprintf(res, string(output))
+		output, _ := json.Marshal(headers)
+		fmt.Fprintf(res, string(output))
+	*/
+
+	if count < total {
+
+		rnd := rand.Float64()
+		fmt.Println("Random float:", rnd)
+		if rnd <= sampleRate {
+			fmt.Println("Adding to headers!")
+			header_list = append(header_list, headers)
+			count++
+		}
+	} else {
+
+		hList, _ := json.Marshal(header_list)
+		_ = writeToFile("playback_headers.txt", string(hList))
+		fmt.Println("Header collection complete.\n")
+		os.Exit(0)
+	}
 
 }
 
+func showCommandUsage(desc map[string]string) {
+
+	fmt.Println("Command usage:")
+	for k, v := range desc {
+		fmt.Println("\t-" + k + " : " + v)
+	}
+	fmt.Println("")
+	os.Exit(0)
+}
+
 func main() {
+
+	description := map[string]string{
+		"t": "Total number of headers to record (default 50)",
+		"s": "Sample rate x/y - record x out of y requests (default 1/10)",
+	}
+
+	if len(os.Args) == 2 {
+		if os.Args[1] == "-v" || os.Args[1] == "--version" {
+			fmt.Println("GoBench Header Recorder - Version " + getVersion() + "\n")
+			os.Exit(0)
+		} else if os.Args[1] == "-h" || os.Args[1] == "--help" {
+			showCommandUsage(description)
+		}
+	} else if len(os.Args) == 1 {
+		showCommandUsage(description)
+	}
+
+	flag.Int64Var(&total, "t", 50, description["t"])
+	flag.Float64Var(&sampleRate, "s", 0.1, description["s"])
+
+	flag.Parse()
+
+	if sampleRate > 1.0 {
+		sampleRate = 1.0
+	}
+
+	if sampleRate == 0.0 {
+		sampleRate = 0.1
+	}
+
+	if total < 1 {
+		total = 25
+	}
+
+	if total >= 100000 {
+		total = 100000
+	}
+
+	rand.Seed(total)
 
 	wg := &sync.WaitGroup{}
 
