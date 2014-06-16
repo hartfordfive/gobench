@@ -107,6 +107,7 @@ var options = BenchOptions{
 	TotalTests:  30,
 	UrlList:     nil,
 	UserAgents:  nil,
+	ApiKey:      nil,
 }
 
 func dumpToReportFile(bs *BenchStats, bo *BenchOptions, fileNamePrefix string) []string {
@@ -133,7 +134,7 @@ func dumpToReportFile(bs *BenchStats, bo *BenchOptions, fileNamePrefix string) [
 	out += "Num CPU cores used: " + strconv.Itoa(bo.Concurency) + "\n"
 
 	if bo.UrlListLen >= 1 {
-		out += "Total URL variations: " + strconv.Itoa(bo.UrlListLen) + "\n"
+		out += "Total distinct URLs: " + strconv.Itoa(bo.UrlListLen) + "\n"
 	} else {
 		out += "URL tested: " + bo.Url + "\n"
 	}
@@ -173,10 +174,15 @@ func dumpToReportFile(bs *BenchStats, bo *BenchOptions, fileNamePrefix string) [
 
 	// --------------- Write the 3rd report file with the number of hits to each url
 	out = ""
+	lenTestTimes := len(bs.TestTime)
 	for i := 0; i < bs.TestCount; i++ {
-		out += strconv.Itoa(bs.TestTime[i])
-		if i < (bs.TestCount - 1) {
-			out += ","
+		if i < lenTestTimes {
+			out += strconv.Itoa(bs.TestTime[i])
+			if i < (bs.TestCount - 1) {
+				out += ","
+			}
+		} else {
+			fmt.Println("\tWarning: Test time", i, "not set")
 		}
 	}
 	nb, _ = fh3.WriteString(out)
@@ -298,9 +304,31 @@ func loadHeadersFile(inFile string) []map[string]string {
 	return headersMap
 }
 
+func loadJsonHeadersFile(inFile string) []map[string]string {
+	// TODO
+}
+
+func loadJsonHeadersFileFromAPI(inUrl string) []map[string]string {
+
+	payload := map[string]string{
+		"of": "JSON", // output format
+		"k":  drc.apiKey,
+	}
+
+	jsonContent, _ := json.Marshal(payload)
+	url := drc.urlEncode(drc.baseUrl+drc.actionTestHeaders, payload)
+
+	if drc.debugMode == 1 {
+		fmt.Println("SetTestHeaders URL:\n", url)
+		fmt.Println("SetTestHeaders JSON Payload:\n", string(jsonContent))
+	}
+
+	drc.headers = drc.getProfile(url)
+}
+
 func makeRequest(urlToCall string, opt *BenchOptions, stats *BenchStats) { //w *sync.WaitGroup) {
 
-	client := &http.Client{}
+	client := http.Client{}
 
 	values := make(url.Values)
 	if len(opt.PostData) >= 1 {
@@ -346,7 +374,16 @@ func makeRequest(urlToCall string, opt *BenchOptions, stats *BenchStats) { //w *
 	}
 
 	tStart := time.Now().UnixNano()
-	resp, _ := client.Do(req)
+	resp, err := client.Do(req)
+
+	if err != nil {
+		fmt.Println("\tWarning: Failed to connect, ", err)
+		stats.TestTime = append(stats.TestTime, 0)
+		stats.TestCount++
+		stats.NumFail++
+		stats.StatusCode["CF"]++
+		return
+	}
 
 	body, _ := ioutil.ReadAll(resp.Body)
 	stats.BytesDownloaded += len(body)
@@ -364,6 +401,7 @@ func makeRequest(urlToCall string, opt *BenchOptions, stats *BenchStats) { //w *
 	}
 
 	if resp.StatusCode != 200 {
+		fmt.Println("\tWarning: Failed request, resp code ", resp.StatusCode)
 		stats.TestTime = append(stats.TestTime, 0)
 		stats.TestCount++
 		stats.NumFail++
@@ -559,10 +597,11 @@ breakout:
 
 	fmt.Println("Total pass: ", stats.NumPass)
 	fmt.Println("Total fail: ", stats.NumFail)
-	fmt.Println("Total responses in 2xx:", stats.StatusCode["2xx"])
-	fmt.Println("Total responses in 3xx:", stats.StatusCode["3xx"])
-	fmt.Println("Total responses in 4xx:", stats.StatusCode["4xx"])
-	fmt.Println("Total responses in 5xx:", stats.StatusCode["5xx"])
+	fmt.Println("\tTotal failed connections:", stats.StatusCode["CF"])
+	fmt.Println("\tTotal responses in 2xx:", stats.StatusCode["2xx"])
+	fmt.Println("\tTotal responses in 3xx:", stats.StatusCode["3xx"])
+	fmt.Println("\tTotal responses in 4xx:", stats.StatusCode["4xx"])
+	fmt.Println("\tTotal responses in 5xx:", stats.StatusCode["5xx"])
 
 	fmt.Println("Shortest time: ", stats.TestTime[0], "ms")
 	fmt.Println("Longest time: ", stats.TestTime[len(stats.TestTime)-1], "ms")
