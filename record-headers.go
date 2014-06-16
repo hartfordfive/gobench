@@ -26,8 +26,10 @@ type RequestHandler struct{}
 
 var sampleRate float64
 var total int64
+var port int
 var count int64
 var header_list []map[string]string
+var once sync.Once
 
 func getVersion() string {
 	return strconv.Itoa(VERSION_MAJOR) + "." + strconv.Itoa(VERSION_MINOR) + "." + strconv.Itoa(VERSION_PATCH) + "-" + VERSION_SUFFIX
@@ -69,18 +71,15 @@ func writeToFile(filePath string, dataToDump string) int {
 
 func (rh *RequestHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 
-	if req.URL.Path != "/" {
-		res.WriteHeader(http.StatusNotFound)
-		res.Header().Set("Cache-control", "public, max-age=0")
-		res.Header().Set("Content-Type", "text/html")
-		res.Header().Set("Server", "GoBench Header Recorder")
-		fmt.Fprintf(res, "Invalid path")
-		return
-	}
-
 	res.Header().Set("Cache-control", "public, max-age=0")
 	res.Header().Set("Content-Type", "text/html")
 	res.Header().Set("Server", "GoBench Header Recorder")
+
+	if req.URL.Path != "/" {
+		res.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(res, "Invalid path")
+		return
+	}
 
 	// Store all the headers from the current request in header map
 	headers := map[string]string{}
@@ -99,11 +98,12 @@ func (rh *RequestHandler) ServeHTTP(res http.ResponseWriter, req *http.Request) 
 		}
 	} else {
 
-		hList, _ := json.Marshal(header_list)
-		_ = writeToFile("playback_headers.txt", string(hList))
-		fmt.Println("Header collection complete.\n")
-		fmt.Println("Headers written to playback_headers.txt\n")
-		os.Exit(0)
+		once.Do(func() {
+			hList, _ := json.Marshal(header_list)
+			_ = writeToFile("playback_headers.txt", string(hList))
+			fmt.Println("Header collection complete, report written to playback_headers.txt\n")
+			os.Exit(0)
+		})
 	}
 
 }
@@ -123,6 +123,7 @@ func main() {
 	description := map[string]string{
 		"t": "Total number of headers to record (default 50)",
 		"s": "Sample rate x.y - (1.0 <= x > 0.0, default 0.2)",
+		"p": "Port on which to listen to (default 8888)",
 	}
 
 	if len(os.Args) == 2 {
@@ -138,6 +139,7 @@ func main() {
 
 	flag.Int64Var(&total, "t", 50, description["t"])
 	flag.Float64Var(&sampleRate, "s", 0.1, description["s"])
+	flag.IntVar(&port, "p", 8888, description["p"])
 
 	flag.Parse()
 
@@ -157,13 +159,23 @@ func main() {
 		total = 100000
 	}
 
+	if port > 65553 {
+		total = 8888
+		fmt.Println("Warning: Max port value is 65553. Value set to 8888.")
+	}
+
+	if port < 1 {
+		port = 8888
+		fmt.Println("Warning: Min port value is 1. Value set to 8888.")
+	}
+
 	rand.Seed(total)
 
 	wg := &sync.WaitGroup{}
 
 	wg.Add(1)
 	go func() {
-		err := http.ListenAndServe("0.0.0.0:8088", &RequestHandler{})
+		err := http.ListenAndServe("0.0.0.0:"+strconv.Itoa(port), &RequestHandler{})
 		if err != nil {
 			fmt.Println("Record headers Error:", err)
 			os.Exit(0)
@@ -171,7 +183,7 @@ func main() {
 		wg.Done()
 	}()
 
-	fmt.Println("[" + dateStampAsString() + "] Logging server started on 0.0.0.0:8088")
+	fmt.Println("[" + dateStampAsString() + "] Logging server started on 0.0.0.0:" + strconv.Itoa(port))
 
 	wg.Wait()
 
