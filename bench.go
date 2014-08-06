@@ -5,7 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"math"
+	//"math"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -42,27 +43,37 @@ type BenchOptions struct {
 	Url         string
 	Cookies     []http.Cookie
 	UserAgents  []string
+	ApiKey      string
 }
 
 type BenchTest struct {
-	TimeTaken  int64
-	StatusCode int
+	TimeTaken       int64
+	StatusCode      int
+	Url             string
+	BytesDownloaded int64
 }
 
 type BenchStats struct {
-	TestCount        int
+	TestCount        int32
 	TotalTime        int64
+	TestsExecuted    int32
 	TestTime         []int
-	AvgTime          int
+	AvgTime          int32
 	MedianTime       int
 	UrlListTestCount map[string]int
-	StatusCode       map[string]int
+	StatusCode       map[string]int32
+	RespCF           int32
+	Resp2xx          int32
+	Resp3xx          int32
+	Resp4xx          int32
+	Resp5xx          int32
 	TestStart        int64
 	TestEnd          int64
-	NumFail          int
-	NumPass          int
+	NumFail          int32
+	NumPass          int32
 	BytesDownloaded  int
 	ServerType       string
+	Lock             *sync.Mutex
 }
 
 func getVersion() string {
@@ -74,8 +85,8 @@ func SortResponseTimes(sl []int) []int {
 	return sl
 }
 
-func FromNanoToMilli(ts int64) int {
-	return int(ts / 1000000)
+func FromNanoToMilli(ts int64) int64 {
+	return (ts / 1000000)
 }
 
 func Readln(r *bufio.Reader) (string, error) {
@@ -105,9 +116,9 @@ var options = BenchOptions{
 	Timeout:     2,
 	TimeBetween: 1000,
 	TotalTests:  30,
-	UrlList:     nil,
-	UserAgents:  nil,
-	ApiKey:      nil,
+	UrlList:     []string{},
+	UserAgents:  []string{},
+	ApiKey:      "",
 }
 
 func dumpToReportFile(bs *BenchStats, bo *BenchOptions, fileNamePrefix string) []string {
@@ -141,19 +152,19 @@ func dumpToReportFile(bs *BenchStats, bo *BenchOptions, fileNamePrefix string) [
 
 	out += "Server Type: " + bs.ServerType + "\n\n"
 
-	out += "Total tests: " + strconv.Itoa(bs.TestCount) + "\n"
+	out += "Total tests: " + strconv.Itoa(int(bs.TestCount)) + "\n"
 	out += "Total bytes downloaded: " + strconv.Itoa(bs.BytesDownloaded) + "\n"
-	out += "Total passed: " + strconv.Itoa(bs.NumPass) + "\n"
-	out += "Total failed: " + strconv.Itoa(bs.NumFail) + "\n"
-	out += "\t2xx responses: " + strconv.Itoa(bs.StatusCode["2xx"]) + "\n"
-	out += "\t3xx responses: " + strconv.Itoa(bs.StatusCode["3xx"]) + "\n"
-	out += "\t4xx responses: " + strconv.Itoa(bs.StatusCode["4xx"]) + "\n"
-	out += "\t5xx responses: " + strconv.Itoa(bs.StatusCode["5xx"]) + "\n\n"
+	out += "Total passed: " + strconv.Itoa(int(bs.NumPass)) + "\n"
+	out += "Total failed: " + strconv.Itoa(int(bs.NumFail)) + "\n"
+	out += "\t2xx responses: " + strconv.Itoa(int(bs.Resp2xx)) + "\n"
+	out += "\t3xx responses: " + strconv.Itoa(int(bs.Resp3xx)) + "\n"
+	out += "\t4xx responses: " + strconv.Itoa(int(bs.Resp4xx)) + "\n"
+	out += "\t5xx responses: " + strconv.Itoa(int(bs.Resp5xx)) + "\n\n"
 
 	out += "Shortest time: " + strconv.Itoa(bs.TestTime[0]) + " ms\n"
 	out += "Longest time: " + strconv.Itoa(bs.TestTime[len(bs.TestTime)-1]) + " ms\n"
 	out += "Median time: " + strconv.Itoa(bs.MedianTime) + " ms\n"
-	out += "Average time: " + strconv.Itoa(bs.AvgTime) + " ms\n\n"
+	out += "Average time: " + strconv.Itoa(int(bs.AvgTime)) + " ms\n\n"
 
 	totalBytes := 0
 
@@ -175,8 +186,8 @@ func dumpToReportFile(bs *BenchStats, bo *BenchOptions, fileNamePrefix string) [
 	// --------------- Write the 3rd report file with the number of hits to each url
 	out = ""
 	lenTestTimes := len(bs.TestTime)
-	for i := 0; i < bs.TestCount; i++ {
-		if i < lenTestTimes {
+	for i := int32(0); i < bs.TestCount; i++ {
+		if i < int32(lenTestTimes) {
 			out += strconv.Itoa(bs.TestTime[i])
 			if i < (bs.TestCount - 1) {
 				out += ","
@@ -305,9 +316,10 @@ func loadHeadersFile(inFile string) []map[string]string {
 }
 
 func loadJsonHeadersFile(inFile string) []map[string]string {
-	// TODO
+	return []map[string]string{}
 }
 
+/*
 func loadJsonHeadersFileFromAPI(inUrl string) []map[string]string {
 
 	payload := map[string]string{
@@ -325,9 +337,13 @@ func loadJsonHeadersFileFromAPI(inUrl string) []map[string]string {
 
 	drc.headers = drc.getProfile(url)
 }
+*/
 
-func makeRequest(urlToCall string, opt *BenchOptions, stats *BenchStats) { //w *sync.WaitGroup) {
+func makeRequest(urlToCall string, opt *BenchOptions, stats *BenchStats, wg *sync.WaitGroup, benchTests chan BenchTest) { //w *sync.WaitGroup) {
 
+	fmt.Println("Requesting: ", urlToCall)
+
+	defer wg.Done()
 	client := http.Client{}
 
 	values := make(url.Values)
@@ -376,47 +392,69 @@ func makeRequest(urlToCall string, opt *BenchOptions, stats *BenchStats) { //w *
 	tStart := time.Now().UnixNano()
 	resp, err := client.Do(req)
 
+	// Increment the total test count
+	atomic.AddInt32(&stats.TestCount, 1)
+
 	if err != nil {
 		fmt.Println("\tWarning: Failed to connect, ", err)
-		stats.TestTime = append(stats.TestTime, 0)
-		stats.TestCount++
-		stats.NumFail++
-		stats.StatusCode["CF"]++
+		//stats.TestTime = append(stats.TestTime, 0)
+		//stats.TestCount++
+		//stats.NumFail++
+		//stats.StatusCode["CF"]++
+		benchTests <- BenchTest{TimeTaken: 0, StatusCode: 000, Url: urlToCall, BytesDownloaded: int64(0)}
+		atomic.AddInt32(&stats.TestCount, 1)
 		return
 	}
 
 	body, _ := ioutil.ReadAll(resp.Body)
-	stats.BytesDownloaded += len(body)
+	//stats.BytesDownloaded += len(body)
+	bytesDownloaded := len(body)
 	body = nil
 
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
-		stats.StatusCode["2xx"]++
+		//stats.StatusCode["2xx"]++
+		atomic.AddInt32(&stats.Resp2xx, 1)
 	case resp.StatusCode >= 300 && resp.StatusCode < 400:
-		stats.StatusCode["3xx"]++
+		//stats.StatusCode["3xx"]++
+		atomic.AddInt32(&stats.Resp3xx, 1)
 	case resp.StatusCode >= 400 && resp.StatusCode < 500:
-		stats.StatusCode["4xx"]++
+		//stats.StatusCode["4xx"]++
+		atomic.AddInt32(&stats.Resp4xx, 1)
 	case resp.StatusCode >= 500:
-		stats.StatusCode["5xx"]++
+		//stats.StatusCode["5xx"]++
+		atomic.AddInt32(&stats.Resp5xx, 1)
 	}
 
 	if resp.StatusCode != 200 {
 		fmt.Println("\tWarning: Failed request, resp code ", resp.StatusCode)
-		stats.TestTime = append(stats.TestTime, 0)
-		stats.TestCount++
-		stats.NumFail++
+		//stats.TestTime = append(stats.TestTime, 0)
+		//stats.TestCount++
+		//stats.NumFail++
+		atomic.AddInt32(&stats.NumFail, 1)
+		benchTests <- BenchTest{TimeTaken: 0, StatusCode: resp.StatusCode, Url: urlToCall, BytesDownloaded: int64(bytesDownloaded)}
+		atomic.AddInt32(&stats.TestCount, 1)
 		return
 	}
 
 	defer resp.Body.Close()
 	tEnd := time.Now().UnixNano()
 
-	stats.TestTime = append(stats.TestTime, FromNanoToMilli(tEnd-tStart)) // convert to milliseconds
-	stats.TestCount++
-	stats.NumPass++
+	//stats.TestTime = append(stats.TestTime, FromNanoToMilli(tEnd-tStart)) // convert to milliseconds
+	//stats.TestCount++
+	//stats.NumPass++
 
-	if resp.Header.Get("Server") != "" {
+	benchTests <- BenchTest{TimeTaken: FromNanoToMilli(tEnd - tStart), StatusCode: resp.StatusCode, Url: urlToCall, BytesDownloaded: int64(bytesDownloaded)}
+	atomic.AddInt32(&stats.TestCount, 1)
+
+	//if resp.Header.Get("Server") != "" {
+	if stats.ServerType == "" {
+		// Lock the variable
+		stats.Lock.Lock()
+		// then set it
 		stats.ServerType = resp.Header.Get("Server")
+		// and release the lock
+		stats.Lock.Unlock()
 	}
 
 }
@@ -435,7 +473,9 @@ func main() {
 
 	var url, postDataFile, urlList, uaList, cookieFile, userAgent, headersList string
 	var concurency, totalTests, maxCores, rampTime, timeWait int
-	var once [4]sync.Once
+	//var once [4]sync.Once
+	var wg sync.WaitGroup
+	var benchTests chan BenchTest
 
 	description := map[string]string{
 		"u":  "The full url to test (required)",
@@ -527,56 +567,42 @@ func main() {
 	options.TotalTests = totalTests
 	options.Concurency = concurency
 
-	statusCodes := map[string]int{"2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0}
-	stats := BenchStats{TestStart: time.Now().UnixNano(), BytesDownloaded: 0, ServerType: "", StatusCode: statusCodes, UrlListTestCount: map[string]int{}}
+	statusCodes := map[string]int32{"2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0}
+	stats := BenchStats{TestStart: time.Now().UnixNano(), BytesDownloaded: 0, ServerType: "", StatusCode: statusCodes, UrlListTestCount: map[string]int{}, Lock: &sync.Mutex{}}
+	wg.Add(totalTests)
 
-	i := totalTests
-	done := make(chan bool, totalTests)
+	//i := totalTests
+	//done := make(chan bool) // totalTests
+	benchTests = make(chan BenchTest, totalTests)
 
 	if rampTime > 0 && concurency >= 1 {
 
 	}
 
-	for {
-		for j := 0; j < concurency; j++ {
-
-			progress := (stats.TestCount * 100) / totalTests
-			switch {
-			case progress >= 25 && progress < 50:
-				once[0].Do(func() { fmt.Println("25% Completed..") })
-			case progress >= 50 && progress < 75:
-				once[1].Do(func() { fmt.Println("50% Completed..") })
-			case progress >= 75 && progress < 100:
-				once[2].Do(func() { fmt.Println("75% Completed..") })
-			}
-
-			if i < 1 {
-				once[3].Do(func() { fmt.Println("100% Completed..") })
-				goto breakout
-			}
-
-			go func() {
+	for j := 0; j < concurency; j++ {
+		// GO thread to run the individual tests
+		go func() {
+			// only do test if there are
+			if stats.TestCount < int32(options.TotalTests) {
 				if options.UrlList != nil {
 					rand.Seed(time.Now().UnixNano())
 					url = options.UrlList[rand.Intn(options.UrlListLen)]
 				}
-				makeRequest(url, &options, &stats)
-				stats.UrlListTestCount[url]++
-				done <- true
-			}()
-			i--
-		}
+				makeRequest(url, &options, &stats, &wg, benchTests)
+				//stats.UrlListTestCount[url]++
+				//done <- true
+			}
 
-		if timeWait > 0 {
-			time.Sleep(time.Duration(timeWait) * time.Millisecond)
-		} else {
-			time.Sleep(time.Duration(options.TimeBetween) * time.Millisecond)
-		}
+		}()
 
 	}
+	wg.Done()
+	fmt.Println("Issued all threads!")
+	wg.Wait()
 
-breakout:
+	fmt.Println("All threads done!")
 
+	close(benchTests)
 	stats.TestEnd = time.Now().UnixNano()
 	stats.TestTime = SortResponseTimes(stats.TestTime)
 
@@ -589,6 +615,20 @@ breakout:
 		fmt.Println("URL Requested: " + url)
 	}
 
+	// Now process the stats from the BenchTest objects
+	/*
+		TimeTaken       int64
+		StatusCode      int
+		Url             string
+		BytesDownloaded int64
+	*/
+
+	/*
+		for i := range benchTests {
+			fmt.Println(i)
+		}
+	*/
+
 	fmt.Println("Server type: ", stats.ServerType)
 	fmt.Println("Total tests run: ", stats.TestCount)
 	if stats.BytesDownloaded > 0 {
@@ -597,39 +637,40 @@ breakout:
 
 	fmt.Println("Total pass: ", stats.NumPass)
 	fmt.Println("Total fail: ", stats.NumFail)
-	fmt.Println("\tTotal failed connections:", stats.StatusCode["CF"])
-	fmt.Println("\tTotal responses in 2xx:", stats.StatusCode["2xx"])
-	fmt.Println("\tTotal responses in 3xx:", stats.StatusCode["3xx"])
-	fmt.Println("\tTotal responses in 4xx:", stats.StatusCode["4xx"])
-	fmt.Println("\tTotal responses in 5xx:", stats.StatusCode["5xx"])
+	fmt.Println("\tTotal failed connections:", stats.RespCF)
+	fmt.Println("\tTotal responses in 2xx:", stats.Resp2xx)
+	fmt.Println("\tTotal responses in 3xx:", stats.Resp3xx)
+	fmt.Println("\tTotal responses in 4xx:", stats.Resp4xx)
+	fmt.Println("\tTotal responses in 5xx:", stats.Resp5xx)
 
-	fmt.Println("Shortest time: ", stats.TestTime[0], "ms")
-	fmt.Println("Longest time: ", stats.TestTime[len(stats.TestTime)-1], "ms")
+	/*
+		fmt.Println("Shortest time: ", stats.TestTime[0], "ms")
+		fmt.Println("Longest time: ", stats.TestTime[len(stats.TestTime)-1], "ms")
 
-	if totalTests%2 == 1 {
-		var index int = int(math.Ceil(float64(len(stats.TestTime) / 2)))
-		stats.MedianTime = int(stats.TestTime[index])
-	} else {
-		var index int = totalTests / 2
-		stats.MedianTime = (stats.TestTime[index] + stats.TestTime[index+1]) / 2
-	}
+		if totalTests%2 == 1 {
+			var index int = int(math.Ceil(float64(len(stats.TestTime) / 2)))
+			stats.MedianTime = int(stats.TestTime[index])
+		} else {
+			var index int = totalTests / 2
+			stats.MedianTime = (stats.TestTime[index] + stats.TestTime[index+1]) / 2
+		}
 
-	for i := 0; i < len(stats.TestTime); i++ {
-		stats.AvgTime += stats.TestTime[i]
-	}
-	stats.AvgTime = int(stats.AvgTime / stats.TestCount)
+		for i := 0; i < len(stats.TestTime); i++ {
+			stats.AvgTime += int32(stats.TestTime[i])
+		}
+		stats.AvgTime = int32(stats.AvgTime) / stats.TestCount
 
-	fmt.Println("Median time: ", stats.MedianTime, "ms")
-	fmt.Println("Avg. time:", stats.AvgTime, "ms")
+		fmt.Println("Median time: ", stats.MedianTime, "ms")
+		fmt.Println("Avg. time:", stats.AvgTime, "ms")
 
-	fmt.Println("")
-	files := dumpToReportFile(&stats, &options, "stress_test")
-	fmt.Println("For more details, please view the following saved reports:")
-	for i := 0; i < len(files); i++ {
-		fmt.Println("\t" + files[i])
-	}
-	fmt.Println("")
-
-	<-done
+		fmt.Println("")
+		files := dumpToReportFile(&stats, &options, "stress_test")
+		fmt.Println("For more details, please view the following saved reports:")
+		for i := 0; i < len(files); i++ {
+			fmt.Println("\t" + files[i])
+		}
+		fmt.Println("")
+	*/
+	//<-done
 
 }
