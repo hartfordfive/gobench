@@ -3,6 +3,9 @@
 
 A simple HTTP stress testing tool <br/><br/>
 
+##  Notice
+
+**This project is no longer maintained.   Considering it was from my earlier days in Go development, it has a variety of bugs, especially concurency related ones.  Unfortunately these won't be fixed, although I may eventually decided to create a new and improved version.**
 
 Sample Usage Example:<br/>
 -----------------------<br/>
